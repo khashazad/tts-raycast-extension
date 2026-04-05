@@ -1,0 +1,127 @@
+{
+  "name": "tts-raycast-extension",
+  "title": "TTS Reader",
+  "version": "0.1.0",
+  "description": "Raycast extension that reads selected text aloud with ElevenLabs",
+  "icon": "extension-icon.png",
+  "author": "thomas",
+  "platforms": ["macOS"],
+  "categories": ["Productivity"],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "speak-selected",
+      "title": "Speak Selected",
+      "description": "Read currently selected text aloud",
+      "mode": "no-view"
+    },
+    {
+      "name": "pause-resume",
+      "title": "Pause or Resume",
+      "description": "Toggle playback pause and resume",
+      "mode": "no-view"
+    },
+    {
+      "name": "stop",
+      "title": "Stop Playback",
+      "description": "Stop active speech playback",
+      "mode": "no-view"
+    },
+    {
+      "name": "skip-back",
+      "title": "Skip Back",
+      "description": "Rewind playback by configured seconds",
+      "mode": "no-view"
+    },
+    {
+      "name": "skip-forward",
+      "title": "Skip Forward",
+      "description": "Fast-forward playback by configured seconds",
+      "mode": "no-view"
+    },
+    {
+      "name": "tts-status",
+      "title": "TTS Status",
+      "description": "Show current playback status in the menu bar",
+      "mode": "menu-bar",
+      "interval": "5s"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "apiKey",
+      "title": "ElevenLabs API Key",
+      "description": "API key for ElevenLabs speech synthesis",
+      "type": "password",
+      "required": true
+    },
+    {
+      "name": "voiceId",
+      "title": "Voice",
+      "description": "Voice ID to use for text-to-speech output",
+      "type": "dropdown",
+      "default": "",
+      "data": [
+        {
+          "title": "Auto (First Available Voice)",
+          "value": ""
+        }
+      ],
+      "required": false
+    },
+    {
+      "name": "speed",
+      "title": "Speed",
+      "description": "Speech speed multiplier such as 1.0 or 1.15",
+      "type": "textfield",
+      "default": "1.0",
+      "required": true
+    },
+    {
+      "name": "skipDuration",
+      "title": "Skip Duration (Seconds)",
+      "description": "Seconds to move backward or forward per skip command",
+      "type": "textfield",
+      "default": "10",
+      "required": true
+    },
+    {
+      "name": "modelId",
+      "title": "Model",
+      "description": "ElevenLabs model used for synthesis",
+      "type": "dropdown",
+      "default": "eleven_turbo_v2_5",
+      "data": [
+        {
+          "title": "eleven_turbo_v2_5",
+          "value": "eleven_turbo_v2_5"
+        },
+        {
+          "title": "eleven_multilingual_v2",
+          "value": "eleven_multilingual_v2"
+        }
+      ],
+      "required": true
+    }
+  ],
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.18.0",
+    "@raycast/api": "^1.80.0",
+    "react": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.10",
+    "@types/react": "19.0.10",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.1"
+  },
+  "raycast": {
+    "schemaVersion": 1
+  }
+}
