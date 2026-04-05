@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampOffset, getCurrentOffset, getPlaybackInvocation } from "./playback";
+import { clampOffset, getBinaryLookupCandidates, getCurrentOffset, getPlaybackInvocation } from "./playback";
 
 describe("getCurrentOffset", () => {
   it("adds elapsed runtime seconds to existing offset", () => {
@@ -35,5 +35,15 @@ describe("getPlaybackInvocation", () => {
       command: "ffplay",
       args: ["-nodisp", "-autoexit", "-loglevel", "quiet", "-ss", "12.5", "-i", "/tmp/audio.mp3"],
     });
+  });
+});
+
+describe("getBinaryLookupCandidates", () => {
+  it("prefers absolute afplay path on darwin", () => {
+    expect(getBinaryLookupCandidates("afplay", "darwin")).toEqual(["/usr/bin/afplay", "afplay"]);
+  });
+
+  it("keeps ffplay lookup PATH-based", () => {
+    expect(getBinaryLookupCandidates("ffplay", "darwin")).toEqual(["ffplay"]);
   });
 });
