@@ -8,10 +8,12 @@ import { clearState, readState } from "./lib/state";
  * @returns {Promise<void>} Nothing.
  */
 export default async function command(): Promise<void> {
-  const state = await readState(STATE_FILE_PATH);
-  if (state && isProcessAlive(state.pid)) {
-    stopProcess(state.pid);
+  try {
+    const state = await readState(STATE_FILE_PATH);
+    if (state && isProcessAlive(state.pid)) {
+      stopProcess(state.pid);
+    }
+  } finally {
+    await clearState(STATE_FILE_PATH);
   }
-
-  await clearState(STATE_FILE_PATH);
 }

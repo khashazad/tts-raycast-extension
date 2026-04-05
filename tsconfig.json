@@ -10,7 +10,7 @@
     "resolveJsonModule": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["node", "vitest/globals"]
+    "types": ["node"]
   },
   "include": ["src/**/*", "vitest.config.ts", "raycast-env.d.ts"]
 }

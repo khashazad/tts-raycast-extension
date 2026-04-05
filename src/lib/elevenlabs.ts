@@ -65,9 +65,14 @@ export async function synthesizeWithTimestamps(options: SynthesisOptions): Promi
   const lastCharacterEndTime = getLastAlignmentEndTime(alignment);
   const lastWordEndTime = words.length > 0 ? words[words.length - 1].end : 0;
   const audioDuration = Math.max(lastWordEndTime, lastCharacterEndTime);
+  const audioBase64 =
+    (response as { audio_base64?: string; audioBase64?: string }).audio_base64 ?? response.audioBase64;
+  if (!audioBase64) {
+    throw new Error("ElevenLabs response did not include audio payload");
+  }
 
   return {
-    audioBuffer: Buffer.from(response.audioBase64, "base64"),
+    audioBuffer: Buffer.from(audioBase64, "base64"),
     words,
     audioDuration,
   };
