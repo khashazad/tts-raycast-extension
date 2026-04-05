@@ -13,6 +13,21 @@ export class AfplayNotFoundError extends Error {
   }
 }
 
+export class SeekPlayerNotFoundError extends Error {
+  constructor() {
+    super("ffplay not found");
+    this.name = "SeekPlayerNotFoundError";
+  }
+}
+
+interface PlaybackInvocation {
+  command: "afplay" | "ffplay";
+  args: string[];
+}
+
+let cachedAfplayAvailability: boolean | null = null;
+let cachedFfplayAvailability: boolean | null = null;
+
 /**
  * Computes current playback offset from base offset and wall-clock time.
  *
@@ -83,13 +98,15 @@ export function stopProcess(pid: number): void {
  * @throws {Error} When process spawning fails.
  */
 export async function spawnPlayback(audioPath: string, offset: number): Promise<number> {
-  if (!isAfplayAvailable()) {
+  const invocation = getPlaybackInvocation(audioPath, offset);
+  if (invocation.command === "afplay" && !isAfplayAvailable()) {
     throw new AfplayNotFoundError();
   }
+  if (invocation.command === "ffplay" && !isFfplayAvailable()) {
+    throw new SeekPlayerNotFoundError();
+  }
 
-  const roundedOffset = Math.max(offset, 0);
-  const args = roundedOffset > 0 ? ["-t", `${roundedOffset}`, audioPath] : [audioPath];
-  const processHandle = spawn("afplay", args, { detached: true, stdio: "ignore" });
+  const processHandle = spawn(invocation.command, invocation.args, { detached: true, stdio: "ignore" });
   processHandle.unref();
 
   if (!processHandle.pid) {
@@ -100,11 +117,62 @@ export async function spawnPlayback(audioPath: string, offset: number): Promise<
 }
 
 /**
+ * Resolves the playback command and arguments for a given offset.
+ *
+ * @param {string} audioPath - Absolute path to audio file.
+ * @param {number} offset - Playback offset in seconds.
+ * @returns {PlaybackInvocation} Command and arguments to spawn.
+ */
+export function getPlaybackInvocation(audioPath: string, offset: number): PlaybackInvocation {
+  const roundedOffset = Math.max(offset, 0);
+  if (roundedOffset === 0) {
+    return {
+      command: "afplay",
+      args: [audioPath],
+    };
+  }
+
+  return {
+    command: "ffplay",
+    args: ["-nodisp", "-autoexit", "-loglevel", "quiet", "-ss", `${roundedOffset}`, "-i", audioPath],
+  };
+}
+
+/**
  * Verifies that `afplay` is available on the current machine.
  *
  * @returns {boolean} `true` when `afplay` is installed.
  */
 function isAfplayAvailable(): boolean {
-  const result = spawnSync("which", ["afplay"], { stdio: "ignore" });
+  if (cachedAfplayAvailability !== null) {
+    return cachedAfplayAvailability;
+  }
+
+  cachedAfplayAvailability = hasBinary("afplay");
+  return cachedAfplayAvailability;
+}
+
+/**
+ * Verifies that `ffplay` is available on the current machine.
+ *
+ * @returns {boolean} `true` when `ffplay` is installed.
+ */
+function isFfplayAvailable(): boolean {
+  if (cachedFfplayAvailability !== null) {
+    return cachedFfplayAvailability;
+  }
+
+  cachedFfplayAvailability = hasBinary("ffplay");
+  return cachedFfplayAvailability;
+}
+
+/**
+ * Checks whether a command exists in PATH.
+ *
+ * @param {"afplay" | "ffplay"} binary - Binary name to check.
+ * @returns {boolean} `true` when command exists.
+ */
+function hasBinary(binary: "afplay" | "ffplay"): boolean {
+  const result = spawnSync("which", [binary], { stdio: "ignore" });
   return result.status === 0;
 }

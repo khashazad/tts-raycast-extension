@@ -53,6 +53,10 @@ export default async function command(): Promise<void> {
   } catch (error) {
     if (error instanceof AfplayNotFoundError) {
       await showHUD("afplay not found — macOS only");
+      return;
     }
+
+    console.error("Resume playback failed", error);
+    await showHUD("Resume failed");
   }
 }

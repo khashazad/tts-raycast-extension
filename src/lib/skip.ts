@@ -53,6 +53,10 @@ export async function skipByDirection(direction: -1 | 1): Promise<void> {
   } catch (error) {
     if (error instanceof AfplayNotFoundError) {
       await showHUD("afplay not found — macOS only");
+      return;
     }
+
+    console.error("Skip playback failed", error);
+    await showHUD("Playback error");
   }
 }

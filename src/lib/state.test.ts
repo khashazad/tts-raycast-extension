@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -21,11 +21,17 @@ async function createTempDir(): Promise<string> {
 }
 
 afterEach(async () => {
-  await Promise.all(
+  const cleanupResults = await Promise.allSettled(
     createdDirs.splice(0).map(async (directory) => {
       await rm(directory, { force: true, recursive: true });
     }),
   );
+
+  cleanupResults.forEach((result) => {
+    if (result.status === "rejected") {
+      console.error("Failed to cleanup temporary test directory", result.reason);
+    }
+  });
 });
 
 describe("state persistence", () => {
@@ -63,6 +69,36 @@ describe("state persistence", () => {
 
     await writeState(statePath, expected);
     await clearState(statePath);
+
+    expect(await readState(statePath)).toBeNull();
+  });
+
+  it("returns null when words contain invalid entries", async () => {
+    const directory = await createTempDir();
+    const statePath = path.join(directory, "state.json");
+    await writeState(
+      statePath,
+      {
+        status: "playing",
+        startedAt: 1000,
+        offset: 2,
+        pid: 1234,
+        audioPath: "/tmp/raycast-tts-audio.mp3",
+        audioDuration: 5,
+        words: [{ word: "Hello", start: 0, end: 1 }],
+      } as TTSState,
+    );
+
+    const invalidRawState = JSON.stringify({
+      status: "playing",
+      startedAt: 1000,
+      offset: 2,
+      pid: 1234,
+      audioPath: "/tmp/raycast-tts-audio.mp3",
+      audioDuration: 5,
+      words: [{ word: "Hello", start: 0, end: "bad-end" }],
+    });
+    await writeFile(statePath, invalidRawState, "utf8");
 
     expect(await readState(statePath)).toBeNull();
   });

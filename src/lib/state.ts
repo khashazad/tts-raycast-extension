@@ -1,5 +1,4 @@
-import { access, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { constants as fileConstants } from "node:fs";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 
 import { STATE_FILE_PATH } from "./constants";
 import { isProcessAlive } from "./playback";
@@ -12,12 +11,6 @@ import type { TTSState } from "./types";
  * @returns {Promise<TTSState | null>} Parsed state, or `null` when missing/invalid.
  */
 export async function readState(statePath: string = STATE_FILE_PATH): Promise<TTSState | null> {
-  try {
-    await access(statePath, fileConstants.F_OK);
-  } catch {
-    return null;
-  }
-
   try {
     const raw = await readFile(statePath, "utf8");
     const parsed = JSON.parse(raw) as TTSState;
@@ -92,6 +85,30 @@ function isStateShapeValid(value: unknown): value is TTSState {
     typeof candidate.pid === "number" &&
     typeof candidate.audioPath === "string" &&
     typeof candidate.audioDuration === "number" &&
-    Array.isArray(candidate.words)
+    Array.isArray(candidate.words) &&
+    candidate.words.every((wordEntry) => isWordEntryShapeValid(wordEntry))
   );
+}
+
+/**
+ * Validates runtime shape of a single timestamped word entry.
+ *
+ * @param {unknown} value - Candidate word entry.
+ * @returns {boolean} `true` when value is a valid timestamped word.
+ */
+function isWordEntryShapeValid(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as { word?: unknown; start?: unknown; end?: unknown };
+  if (
+    typeof candidate.word !== "string" ||
+    typeof candidate.start !== "number" ||
+    typeof candidate.end !== "number"
+  ) {
+    return false;
+  }
+
+  return Number.isFinite(candidate.start) && Number.isFinite(candidate.end) && candidate.start <= candidate.end;
 }
