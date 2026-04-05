@@ -106,8 +106,9 @@
   ],
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc --noEmit",
-    "lint": "tsc --noEmit",
+    "build": "ray build -e dist",
+    "lint": "ray lint",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
