@@ -27,11 +27,13 @@ afterEach(async () => {
     }),
   );
 
-  cleanupResults.forEach((result) => {
-    if (result.status === "rejected") {
-      console.error("Failed to cleanup temporary test directory", result.reason);
-    }
-  });
+  const failures = cleanupResults.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures.map((failure) => failure.reason),
+      "Failed to cleanup temporary test directory",
+    );
+  }
 });
 
 describe("state persistence", () => {
