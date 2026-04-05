@@ -12,6 +12,7 @@
 - 2026-04-05T14:56Z [CODE] Added menu-bar command polling every 5 seconds and command-launch actions for pause/resume + stop.
 - 2026-04-05T14:56Z [TOOL] Typecheck/build initially failed on React typings mismatch; fixed by aligning to React 19 types compatible with `@raycast/api`.
 - 2026-04-05T14:58Z [CODE] Added `.gitignore` to exclude local artifacts (`node_modules`, `dist`, `.superpowers`) and generated Raycast typings file integration via `tsconfig.json`.
+- 2026-04-05T15:12Z [USER] Requested correction to build scripts; updated npm scripts so `build` uses Raycast CLI, `lint` uses Raycast lint, and `typecheck` runs standalone `tsc --noEmit`.
 
 [DISCOVERIES]
 - 2026-04-05T14:56Z [TOOL] `afplay --help` indicates `-t/--time` is a duration flag, not a seek-start flag. Current implementation follows provided spec behavior but this may limit true resume/seek fidelity in runtime.
@@ -21,3 +22,4 @@
 - 2026-04-05T14:56Z [TOOL] Verification complete: `npm test`, `npm run lint`, `npm run build`, and `npx ray lint` all pass.
 - 2026-04-05T14:56Z [CODE] Extension now includes six commands, shared state/playback/ElevenLabs modules, and tests for timestamp mapping, offset math, and state persistence.
 - 2026-04-05T14:58Z [TOOL] `npx ray build -e dist` completes successfully and compiles all six command entry points.
+- 2026-04-05T15:12Z [TOOL] Post-script-change verification passed: `npm run test`, `npm run typecheck`, `npm run lint`, `npm run build`.
