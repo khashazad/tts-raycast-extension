@@ -6,10 +6,8 @@ import {
   SeekPlayerNotFoundError,
   clampOffset,
   getCurrentOffset,
-  isProcessAlive,
-  pauseProcess,
-  resumeProcess,
   spawnPlayback,
+  stopProcessWithEscalation,
 } from "./lib/playback";
 import { readActiveState, writeState } from "./lib/state";
 
@@ -29,34 +27,23 @@ export default async function command(): Promise<void> {
       getCurrentOffset({ startedAt: state.startedAt, offset: state.offset }),
       state.audioDuration,
     );
-    const hasActiveProcess = isProcessAlive(state.pid);
-
-    if (hasActiveProcess) {
-      pauseProcess(state.pid);
-    }
+    await stopProcessWithEscalation(state.pid);
 
     await writeState(STATE_FILE_PATH, {
       ...state,
       status: "paused",
       offset: currentOffset,
       startedAt: Date.now(),
-      pid: hasActiveProcess ? state.pid : 0,
-    });
-    return;
-  }
-
-  if (isProcessAlive(state.pid)) {
-    resumeProcess(state.pid);
-    await writeState(STATE_FILE_PATH, {
-      ...state,
-      status: "playing",
-      startedAt: Date.now(),
-      pid: state.pid,
+      pid: 0,
     });
     return;
   }
 
   try {
+    if (state.pid > 0) {
+      await stopProcessWithEscalation(state.pid);
+    }
+
     const pid = await spawnPlayback(state.audioPath, state.offset);
     await writeState(STATE_FILE_PATH, {
       ...state,
