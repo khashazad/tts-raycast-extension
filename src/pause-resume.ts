@@ -3,11 +3,13 @@ import { showHUD } from "@raycast/api";
 import { STATE_FILE_PATH } from "./lib/constants";
 import {
   AfplayNotFoundError,
+  SeekPlayerNotFoundError,
   clampOffset,
   getCurrentOffset,
   isProcessAlive,
+  pauseProcess,
+  resumeProcess,
   spawnPlayback,
-  stopProcess,
 } from "./lib/playback";
 import { readActiveState, writeState } from "./lib/state";
 
@@ -27,9 +29,10 @@ export default async function command(): Promise<void> {
       getCurrentOffset({ startedAt: state.startedAt, offset: state.offset }),
       state.audioDuration,
     );
+    const hasActiveProcess = isProcessAlive(state.pid);
 
-    if (isProcessAlive(state.pid)) {
-      stopProcess(state.pid);
+    if (hasActiveProcess) {
+      pauseProcess(state.pid);
     }
 
     await writeState(STATE_FILE_PATH, {
@@ -37,7 +40,18 @@ export default async function command(): Promise<void> {
       status: "paused",
       offset: currentOffset,
       startedAt: Date.now(),
-      pid: 0,
+      pid: hasActiveProcess ? state.pid : 0,
+    });
+    return;
+  }
+
+  if (isProcessAlive(state.pid)) {
+    resumeProcess(state.pid);
+    await writeState(STATE_FILE_PATH, {
+      ...state,
+      status: "playing",
+      startedAt: Date.now(),
+      pid: state.pid,
     });
     return;
   }
@@ -53,6 +67,11 @@ export default async function command(): Promise<void> {
   } catch (error) {
     if (error instanceof AfplayNotFoundError) {
       await showHUD("afplay not found — macOS only");
+      return;
+    }
+
+    if (error instanceof SeekPlayerNotFoundError && state.offset > 0) {
+      await showHUD("ffplay not found — cannot resume paused playback");
       return;
     }
 

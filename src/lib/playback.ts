@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 
 export interface OffsetInput {
   startedAt: number;
@@ -25,8 +26,8 @@ interface PlaybackInvocation {
   args: string[];
 }
 
-let cachedAfplayAvailability: boolean | null = null;
-let cachedFfplayAvailability: boolean | null = null;
+let cachedAfplayBinary: string | null | undefined;
+let cachedFfplayBinary: string | null | undefined;
 
 /**
  * Computes current playback offset from base offset and wall-clock time.
@@ -77,15 +78,47 @@ export function isProcessAlive(pid: number): boolean {
  * @returns {void} Nothing.
  */
 export function stopProcess(pid: number): void {
+  signalProcess(pid, "SIGTERM");
+}
+
+/**
+ * Stops a process with TERM first, then escalates to KILL if needed.
+ *
+ * @param {number} pid - Process ID to terminate.
+ * @param {number} gracePeriodMs - Milliseconds to wait before escalation.
+ * @returns {Promise<void>} Nothing.
+ */
+export async function stopProcessWithEscalation(pid: number, gracePeriodMs: number = 250): Promise<void> {
   if (!isProcessAlive(pid)) {
     return;
   }
 
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch {
-    // Ignore race conditions where the process exits after liveness check.
+  stopProcess(pid);
+  await sleep(Math.max(0, gracePeriodMs));
+
+  if (isProcessAlive(pid)) {
+    signalProcess(pid, "SIGKILL");
   }
+}
+
+/**
+ * Sends a suspend signal to an active playback process.
+ *
+ * @param {number} pid - Process ID to suspend.
+ * @returns {void} Nothing.
+ */
+export function pauseProcess(pid: number): void {
+  signalProcess(pid, "SIGSTOP");
+}
+
+/**
+ * Sends a continue signal to a suspended playback process.
+ *
+ * @param {number} pid - Process ID to resume.
+ * @returns {void} Nothing.
+ */
+export function resumeProcess(pid: number): void {
+  signalProcess(pid, "SIGCONT");
 }
 
 /**
@@ -99,18 +132,20 @@ export function stopProcess(pid: number): void {
  */
 export async function spawnPlayback(audioPath: string, offset: number): Promise<number> {
   const invocation = getPlaybackInvocation(audioPath, offset);
-  if (invocation.command === "afplay" && !isAfplayAvailable()) {
-    throw new AfplayNotFoundError();
-  }
-  if (invocation.command === "ffplay" && !isFfplayAvailable()) {
+  const binaryPath = getBinaryPath(invocation.command);
+  if (!binaryPath) {
+    if (invocation.command === "afplay") {
+      throw new AfplayNotFoundError();
+    }
+
     throw new SeekPlayerNotFoundError();
   }
 
-  const processHandle = spawn(invocation.command, invocation.args, { detached: true, stdio: "ignore" });
+  const processHandle = spawn(binaryPath, invocation.args, { detached: true, stdio: "ignore" });
   processHandle.unref();
 
   if (!processHandle.pid) {
-    throw new Error("Failed to spawn afplay process");
+    throw new Error(`Failed to spawn ${invocation.command} process`);
   }
 
   return processHandle.pid;
@@ -139,40 +174,93 @@ export function getPlaybackInvocation(audioPath: string, offset: number): Playba
 }
 
 /**
- * Verifies that `afplay` is available on the current machine.
+ * Returns lookup candidates for a binary in priority order.
  *
- * @returns {boolean} `true` when `afplay` is installed.
+ * @param {"afplay" | "ffplay"} binary - Binary to resolve.
+ * @param {NodeJS.Platform} platform - Runtime platform.
+ * @returns {string[]} Candidate executable names or absolute paths.
  */
-function isAfplayAvailable(): boolean {
-  if (cachedAfplayAvailability !== null) {
-    return cachedAfplayAvailability;
+export function getBinaryLookupCandidates(binary: "afplay" | "ffplay", platform: NodeJS.Platform): string[] {
+  if (binary === "afplay" && platform === "darwin") {
+    return ["/usr/bin/afplay", "afplay"];
   }
 
-  cachedAfplayAvailability = hasBinary("afplay");
-  return cachedAfplayAvailability;
+  if (binary === "ffplay" && platform === "darwin") {
+    return ["/opt/homebrew/bin/ffplay", "/usr/local/bin/ffplay", "ffplay"];
+  }
+
+  return [binary];
 }
 
 /**
- * Verifies that `ffplay` is available on the current machine.
+ * Resolves a runnable binary path for playback commands.
  *
- * @returns {boolean} `true` when `ffplay` is installed.
+ * @param {"afplay" | "ffplay"} binary - Binary to resolve.
+ * @returns {string | null} Absolute or PATH-based executable string when found.
  */
-function isFfplayAvailable(): boolean {
-  if (cachedFfplayAvailability !== null) {
-    return cachedFfplayAvailability;
+function getBinaryPath(binary: "afplay" | "ffplay"): string | null {
+  if (binary === "afplay" && cachedAfplayBinary !== undefined) {
+    return cachedAfplayBinary;
+  }
+  if (binary === "ffplay" && cachedFfplayBinary !== undefined) {
+    return cachedFfplayBinary;
   }
 
-  cachedFfplayAvailability = hasBinary("ffplay");
-  return cachedFfplayAvailability;
+  const candidate = getBinaryLookupCandidates(binary, process.platform).find((item) => hasBinaryCandidate(item)) ?? null;
+
+  if (candidate !== null) {
+    if (binary === "afplay") {
+      cachedAfplayBinary = candidate;
+    } else {
+      cachedFfplayBinary = candidate;
+    }
+  }
+
+  return candidate;
 }
 
 /**
- * Checks whether a command exists in PATH.
+ * Checks whether an executable can be launched.
  *
- * @param {"afplay" | "ffplay"} binary - Binary name to check.
- * @returns {boolean} `true` when command exists.
+ * @param {string} candidate - Executable candidate path or command name.
+ * @returns {boolean} `true` when executable can be resolved.
  */
-function hasBinary(binary: "afplay" | "ffplay"): boolean {
-  const result = spawnSync("which", [binary], { stdio: "ignore" });
+function hasBinaryCandidate(candidate: string): boolean {
+  if (candidate.startsWith("/")) {
+    return existsSync(candidate);
+  }
+
+  const result = spawnSync("command -v " + candidate, { shell: true, stdio: "ignore" });
   return result.status === 0;
+}
+
+/**
+ * Sends a process signal when the process is still alive.
+ *
+ * @param {number} pid - Process ID to signal.
+ * @param {NodeJS.Signals} signal - Signal to dispatch.
+ * @returns {void} Nothing.
+ */
+function signalProcess(pid: number, signal: NodeJS.Signals): void {
+  if (!isProcessAlive(pid)) {
+    return;
+  }
+
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // Ignore race conditions where the process exits after liveness check.
+  }
+}
+
+/**
+ * Waits for a bounded delay between process-control steps.
+ *
+ * @param {number} milliseconds - Delay duration in milliseconds.
+ * @returns {Promise<void>} Nothing.
+ */
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }

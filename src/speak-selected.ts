@@ -2,11 +2,17 @@ import { getSelectedText, showHUD } from "@raycast/api";
 import { writeFile } from "node:fs/promises";
 
 import { synthesizeWithTimestamps } from "./lib/elevenlabs";
-import { AfplayNotFoundError, isProcessAlive, spawnPlayback, stopProcess } from "./lib/playback";
+import { AfplayNotFoundError, spawnPlayback, stopProcessWithEscalation } from "./lib/playback";
 import { getPreferences, parseSpeed } from "./lib/preferences";
-import { clearState, readState, writeState } from "./lib/state";
-import { AUDIO_FILE_PATH, STATE_FILE_PATH } from "./lib/constants";
-import { createGeneratingState, toErrorMessage } from "./lib/command-utils";
+import { clearState, readState, writeState, writeStateIfSessionMatches } from "./lib/state";
+import { STATE_FILE_PATH, getAudioFilePath } from "./lib/constants";
+import {
+  createGeneratingState,
+  createSessionId,
+  isCurrentSession,
+  removeAudioFile,
+  toErrorMessage,
+} from "./lib/command-utils";
 
 /**
  * Reads currently selected text, synthesizes speech, and starts detached playback.
@@ -14,6 +20,10 @@ import { createGeneratingState, toErrorMessage } from "./lib/command-utils";
  * @returns {Promise<void>} Nothing.
  */
 export default async function command(): Promise<void> {
+  const sessionId = createSessionId();
+  const audioPath = getAudioFilePath(sessionId);
+  let hasPersistedGeneratingState = false;
+  let spawnedPlaybackPid: number | null = null;
   let selectedText: string;
 
   try {
@@ -25,7 +35,8 @@ export default async function command(): Promise<void> {
 
   try {
     await stopExistingPlayback();
-    await writeState(STATE_FILE_PATH, createGeneratingState(AUDIO_FILE_PATH));
+    await writeState(STATE_FILE_PATH, createGeneratingState(audioPath, sessionId));
+    hasPersistedGeneratingState = true;
 
     const preferences = getPreferences();
     const synthesis = await synthesizeWithTimestamps({
@@ -36,19 +47,44 @@ export default async function command(): Promise<void> {
       speed: parseSpeed(preferences.speed),
     });
 
-    await writeFile(AUDIO_FILE_PATH, synthesis.audioBuffer);
-    const pid = await spawnPlayback(AUDIO_FILE_PATH, 0);
-    await writeState(STATE_FILE_PATH, {
+    await writeFile(audioPath, synthesis.audioBuffer);
+    if (!(await hasSessionOwnership(sessionId))) {
+      await removeAudioFile(audioPath);
+      return;
+    }
+
+    spawnedPlaybackPid = await spawnPlayback(audioPath, 0);
+    const didPersistPlayingState = await writeStateIfSessionMatches(STATE_FILE_PATH, sessionId, {
+      sessionId,
       status: "playing",
       startedAt: Date.now(),
       offset: 0,
-      pid,
-      audioPath: AUDIO_FILE_PATH,
+      pid: spawnedPlaybackPid,
+      audioPath,
       audioDuration: synthesis.audioDuration,
       words: synthesis.words,
     });
+    if (!didPersistPlayingState) {
+      await stopProcessWithEscalation(spawnedPlaybackPid);
+      await removeAudioFile(audioPath);
+      return;
+    }
   } catch (error) {
-    await clearState(STATE_FILE_PATH);
+    if (spawnedPlaybackPid !== null) {
+      await stopProcessWithEscalation(spawnedPlaybackPid);
+    }
+
+    if (hasPersistedGeneratingState) {
+      const ownsSession = await hasSessionOwnership(sessionId);
+      if (!ownsSession) {
+        await removeAudioFile(audioPath);
+        return;
+      }
+
+      await clearState(STATE_FILE_PATH);
+    }
+
+    await removeAudioFile(audioPath);
 
     if (error instanceof AfplayNotFoundError) {
       await showHUD("afplay not found — macOS only");
@@ -70,9 +106,19 @@ async function stopExistingPlayback(): Promise<void> {
     return;
   }
 
-  if (isProcessAlive(state.pid)) {
-    stopProcess(state.pid);
-  }
+  await stopProcessWithEscalation(state.pid);
 
   await clearState(STATE_FILE_PATH);
+  await removeAudioFile(state.audioPath);
+}
+
+/**
+ * Checks whether the persisted state still belongs to the current command run.
+ *
+ * @param {string} sessionId - Session identifier to verify.
+ * @returns {Promise<boolean>} `true` when command still owns state.
+ */
+async function hasSessionOwnership(sessionId: string): Promise<boolean> {
+  const state = await readState(STATE_FILE_PATH);
+  return isCurrentSession(state, sessionId);
 }

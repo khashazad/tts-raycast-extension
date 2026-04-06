@@ -41,6 +41,7 @@ describe("state persistence", () => {
     const directory = await createTempDir();
     const statePath = path.join(directory, "state.json");
     const expected: TTSState = {
+      sessionId: "session-1",
       status: "playing",
       startedAt: 1000,
       offset: 2,
@@ -60,6 +61,7 @@ describe("state persistence", () => {
     const directory = await createTempDir();
     const statePath = path.join(directory, "state.json");
     const expected: TTSState = {
+      sessionId: "session-2",
       status: "paused",
       startedAt: 1000,
       offset: 2,
@@ -82,6 +84,7 @@ describe("state persistence", () => {
       statePath,
       {
         status: "playing",
+        sessionId: "session-3",
         startedAt: 1000,
         offset: 2,
         pid: 1234,
@@ -93,6 +96,7 @@ describe("state persistence", () => {
 
     const invalidRawState = JSON.stringify({
       status: "playing",
+      sessionId: "session-3",
       startedAt: 1000,
       offset: 2,
       pid: 1234,
@@ -103,5 +107,29 @@ describe("state persistence", () => {
     await writeFile(statePath, invalidRawState, "utf8");
 
     expect(await readState(statePath)).toBeNull();
+  });
+
+  it("normalizes legacy state without sessionId", async () => {
+    const directory = await createTempDir();
+    const statePath = path.join(directory, "state.json");
+    const legacyRawState = JSON.stringify({
+      status: "playing",
+      startedAt: 1000,
+      offset: 2,
+      pid: 1234,
+      audioPath: "/tmp/raycast-tts-audio.mp3",
+      audioDuration: 5,
+      words: [{ word: "Hello", start: 0, end: 1 }],
+    });
+    await writeFile(statePath, legacyRawState, "utf8");
+
+    const normalized = await readState(statePath);
+
+    expect(normalized).toEqual(
+      expect.objectContaining({
+        sessionId: "legacy-1000-1234",
+        status: "playing",
+      }),
+    );
   });
 });
