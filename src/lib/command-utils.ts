@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 
-import { AUDIO_FILE_EXTENSION, AUDIO_FILE_PREFIX } from "./constants";
+import { isManagedAudioPath } from "./constants";
 import type { TTSState } from "./types";
 
 /**
@@ -56,17 +56,6 @@ export async function removeAudioFile(audioPath: string): Promise<void> {
   }
 
   await rm(audioPath, { force: true });
-}
-
-/**
- * Checks whether a path matches extension-managed session audio files.
- *
- * @param {string} audioPath - Candidate audio file path.
- * @returns {boolean} `true` when path is safe for managed deletion.
- */
-function isManagedAudioPath(audioPath: string): boolean {
-  const pattern = new RegExp(`^${AUDIO_FILE_PREFIX}-[A-Za-z0-9-]+\\${AUDIO_FILE_EXTENSION}$`);
-  return pattern.test(audioPath);
 }
 
 /**

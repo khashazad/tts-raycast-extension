@@ -1,4 +1,5 @@
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 
 import { STATE_FILE_PATH } from "./constants";
 import { isProcessAlive } from "./playback";
@@ -14,6 +15,9 @@ interface LegacyTTSState {
   audioDuration: number;
   words: TTSState["words"];
 }
+
+const STATE_LOCK_TIMEOUT_MS = 1_000;
+const STATE_LOCK_RETRY_MS = 25;
 
 /**
  * Reads persisted extension state from disk.
@@ -45,6 +49,31 @@ export async function writeState(statePath: string, state: TTSState): Promise<vo
   const temporaryStatePath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(temporaryStatePath, JSON.stringify(state), "utf8");
   await rename(temporaryStatePath, statePath);
+}
+
+/**
+ * Writes state only when the persisted state still belongs to an expected session.
+ *
+ * @param {string} statePath - Path to the shared state file.
+ * @param {string} expectedSessionId - Session identifier required for ownership.
+ * @param {TTSState} state - State payload to persist when ownership matches.
+ * @returns {Promise<boolean>} `true` when write succeeded, otherwise `false`.
+ * @throws {Error} When state lock cannot be acquired before timeout.
+ */
+export async function writeStateIfSessionMatches(
+  statePath: string,
+  expectedSessionId: string,
+  state: TTSState,
+): Promise<boolean> {
+  return withStateLock(statePath, async () => {
+    const currentState = await readState(statePath);
+    if (!currentState || currentState.sessionId !== expectedSessionId) {
+      return false;
+    }
+
+    await writeState(statePath, state);
+    return true;
+  });
 }
 
 /**
@@ -151,4 +180,85 @@ function getSessionId(state: LegacyTTSState): string {
   }
 
   return `legacy-${state.startedAt}-${state.pid}`;
+}
+
+/**
+ * Executes a state operation while holding the shared lock file.
+ *
+ * @param {string} statePath - Shared state path used to derive lock file path.
+ * @param {() => Promise<T>} operation - Operation to run while lock is held.
+ * @returns {Promise<T>} Operation result.
+ * @throws {Error} When the lock cannot be acquired within timeout.
+ */
+async function withStateLock<T>(statePath: string, operation: () => Promise<T>): Promise<T> {
+  const lockPath = `${statePath}.lock`;
+  const lockHandle = await acquireStateLock(lockPath, STATE_LOCK_TIMEOUT_MS, STATE_LOCK_RETRY_MS);
+  try {
+    return await operation();
+  } finally {
+    await releaseStateLock(lockHandle, lockPath);
+  }
+}
+
+/**
+ * Acquires an exclusive lock file with retry and timeout.
+ *
+ * @param {string} lockPath - Lock file path.
+ * @param {number} timeoutMs - Maximum wait duration in milliseconds.
+ * @param {number} retryDelayMs - Delay between lock attempts in milliseconds.
+ * @returns {Promise<FileHandle>} Open lock-file handle.
+ * @throws {Error} When lock cannot be acquired within timeout.
+ */
+async function acquireStateLock(lockPath: string, timeoutMs: number, retryDelayMs: number): Promise<FileHandle> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (true) {
+    try {
+      return await open(lockPath, "wx");
+    } catch (error) {
+      if (!isLockAlreadyHeldError(error)) {
+        throw error;
+      }
+
+      if (Date.now() >= deadline) {
+        throw new Error("Failed to acquire shared state lock");
+      }
+
+      await sleep(retryDelayMs);
+    }
+  }
+}
+
+/**
+ * Releases a previously acquired lock file.
+ *
+ * @param {FileHandle} lockHandle - Open lock-file handle.
+ * @param {string} lockPath - Lock file path to remove.
+ * @returns {Promise<void>} Nothing.
+ */
+async function releaseStateLock(lockHandle: FileHandle, lockPath: string): Promise<void> {
+  await lockHandle.close();
+  await rm(lockPath, { force: true });
+}
+
+/**
+ * Checks whether an error indicates an already-held exclusive lock.
+ *
+ * @param {unknown} error - Unknown error value from lock creation.
+ * @returns {boolean} `true` when error code indicates EEXIST.
+ */
+function isLockAlreadyHeldError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "EEXIST";
+}
+
+/**
+ * Waits for a bounded delay before retrying lock acquisition.
+ *
+ * @param {number} milliseconds - Delay duration in milliseconds.
+ * @returns {Promise<void>} Nothing.
+ */
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }

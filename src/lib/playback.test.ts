@@ -51,8 +51,12 @@ describe("getBinaryLookupCandidates", () => {
     expect(getBinaryLookupCandidates("afplay", "darwin")).toEqual(["/usr/bin/afplay", "afplay"]);
   });
 
-  it("keeps ffplay lookup PATH-based", () => {
-    expect(getBinaryLookupCandidates("ffplay", "darwin")).toEqual(["ffplay"]);
+  it("checks common macOS ffplay install locations before PATH", () => {
+    expect(getBinaryLookupCandidates("ffplay", "darwin")).toEqual([
+      "/opt/homebrew/bin/ffplay",
+      "/usr/local/bin/ffplay",
+      "ffplay",
+    ]);
   });
 });
 
@@ -79,6 +83,7 @@ describe("signal-based playback control", () => {
 
   it("escalates from SIGTERM to SIGKILL when process remains alive", async () => {
     let isAlive = true;
+    const signalsSent: NodeJS.Signals[] = [];
     const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: number | NodeJS.Signals) => {
       if (signal === 0) {
         if (isAlive) {
@@ -86,6 +91,10 @@ describe("signal-based playback control", () => {
         }
 
         throw new Error("ESRCH");
+      }
+
+      if (typeof signal === "string") {
+        signalsSent.push(signal);
       }
 
       if (signal === "SIGKILL") {
@@ -97,12 +106,13 @@ describe("signal-based playback control", () => {
 
     await stopProcessWithEscalation(1234, 0);
 
-    expect(killSpy).toHaveBeenCalledWith(1234, "SIGTERM");
-    expect(killSpy).toHaveBeenCalledWith(1234, "SIGKILL");
+    expect(killSpy).toHaveBeenCalled();
+    expect(signalsSent).toEqual(["SIGTERM", "SIGKILL"]);
   });
 
   it("does not SIGKILL when SIGTERM already stopped process", async () => {
     let isAlive = true;
+    const signalsSent: NodeJS.Signals[] = [];
     const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: number | NodeJS.Signals) => {
       if (signal === 0) {
         if (isAlive) {
@@ -110,6 +120,10 @@ describe("signal-based playback control", () => {
         }
 
         throw new Error("ESRCH");
+      }
+
+      if (typeof signal === "string") {
+        signalsSent.push(signal);
       }
 
       if (signal === "SIGTERM") {
@@ -121,7 +135,7 @@ describe("signal-based playback control", () => {
 
     await stopProcessWithEscalation(1234, 0);
 
-    expect(killSpy).toHaveBeenCalledWith(1234, "SIGTERM");
-    expect(killSpy).not.toHaveBeenCalledWith(1234, "SIGKILL");
+    expect(killSpy).toHaveBeenCalled();
+    expect(signalsSent).toEqual(["SIGTERM"]);
   });
 });

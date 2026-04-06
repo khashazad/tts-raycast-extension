@@ -14,6 +14,7 @@ const {
   clearStateMock,
   readStateMock,
   writeStateMock,
+  writeStateIfSessionMatchesMock,
   getPreferencesMock,
   parseSpeedMock,
   createSessionIdMock,
@@ -28,6 +29,7 @@ const {
   clearStateMock: vi.fn(),
   readStateMock: vi.fn(),
   writeStateMock: vi.fn(),
+  writeStateIfSessionMatchesMock: vi.fn(),
   getPreferencesMock: vi.fn(),
   parseSpeedMock: vi.fn(),
   createSessionIdMock: vi.fn(),
@@ -60,6 +62,7 @@ vi.mock("./lib/state", () => ({
   clearState: clearStateMock,
   readState: readStateMock,
   writeState: writeStateMock,
+  writeStateIfSessionMatches: writeStateIfSessionMatchesMock,
 }));
 
 vi.mock("./lib/preferences", () => ({
@@ -115,6 +118,7 @@ describe("speak-selected stale session guard", () => {
     });
     writeFileMock.mockResolvedValue(undefined);
     writeStateMock.mockResolvedValue(undefined);
+    writeStateIfSessionMatchesMock.mockResolvedValue(true);
     clearStateMock.mockResolvedValue(undefined);
     removeAudioFileMock.mockResolvedValue(undefined);
   });
@@ -131,5 +135,41 @@ describe("speak-selected stale session guard", () => {
     expect(spawnPlaybackMock).not.toHaveBeenCalled();
     expect(removeAudioFileMock).toHaveBeenCalledWith(getAudioFilePath("session-new"));
     expect(showHUDMock).not.toHaveBeenCalled();
+  });
+
+  it("stops spawned playback when ownership changes before final state write", async () => {
+    readStateMock.mockResolvedValueOnce(null).mockResolvedValueOnce(createState("session-new"));
+    spawnPlaybackMock.mockResolvedValue(4321);
+    writeStateIfSessionMatchesMock.mockResolvedValue(false);
+
+    await command();
+
+    expect(writeStateIfSessionMatchesMock).toHaveBeenCalledWith(
+      STATE_FILE_PATH,
+      "session-new",
+      expect.objectContaining({
+        sessionId: "session-new",
+        status: "playing",
+        pid: 4321,
+      }),
+    );
+    expect(stopProcessWithEscalationMock).toHaveBeenCalledWith(4321);
+    expect(removeAudioFileMock).toHaveBeenCalledWith(getAudioFilePath("session-new"));
+  });
+
+  it("stops spawned playback when final state write throws", async () => {
+    readStateMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(createState("session-new"))
+      .mockResolvedValueOnce(createState("session-new"));
+    spawnPlaybackMock.mockResolvedValue(5678);
+    writeStateIfSessionMatchesMock.mockRejectedValue(new Error("write failed"));
+
+    await command();
+
+    expect(stopProcessWithEscalationMock).toHaveBeenCalledWith(5678);
+    expect(clearStateMock).toHaveBeenCalledWith(STATE_FILE_PATH);
+    expect(removeAudioFileMock).toHaveBeenCalledWith(getAudioFilePath("session-new"));
+    expect(showHUDMock).toHaveBeenCalledWith("ElevenLabs: write failed");
   });
 });

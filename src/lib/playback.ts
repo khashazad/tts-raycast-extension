@@ -185,6 +185,10 @@ export function getBinaryLookupCandidates(binary: "afplay" | "ffplay", platform:
     return ["/usr/bin/afplay", "afplay"];
   }
 
+  if (binary === "ffplay" && platform === "darwin") {
+    return ["/opt/homebrew/bin/ffplay", "/usr/local/bin/ffplay", "ffplay"];
+  }
+
   return [binary];
 }
 
@@ -204,10 +208,12 @@ function getBinaryPath(binary: "afplay" | "ffplay"): string | null {
 
   const candidate = getBinaryLookupCandidates(binary, process.platform).find((item) => hasBinaryCandidate(item)) ?? null;
 
-  if (binary === "afplay") {
-    cachedAfplayBinary = candidate;
-  } else {
-    cachedFfplayBinary = candidate;
+  if (candidate !== null) {
+    if (binary === "afplay") {
+      cachedAfplayBinary = candidate;
+    } else {
+      cachedFfplayBinary = candidate;
+    }
   }
 
   return candidate;

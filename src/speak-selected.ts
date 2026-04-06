@@ -4,7 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { synthesizeWithTimestamps } from "./lib/elevenlabs";
 import { AfplayNotFoundError, spawnPlayback, stopProcessWithEscalation } from "./lib/playback";
 import { getPreferences, parseSpeed } from "./lib/preferences";
-import { clearState, readState, writeState } from "./lib/state";
+import { clearState, readState, writeState, writeStateIfSessionMatches } from "./lib/state";
 import { STATE_FILE_PATH, getAudioFilePath } from "./lib/constants";
 import {
   createGeneratingState,
@@ -22,6 +22,7 @@ import {
 export default async function command(): Promise<void> {
   const sessionId = createSessionId();
   const audioPath = getAudioFilePath(sessionId);
+  let spawnedPlaybackPid: number | null = null;
   let selectedText: string;
 
   try {
@@ -50,24 +51,27 @@ export default async function command(): Promise<void> {
       return;
     }
 
-    const pid = await spawnPlayback(audioPath, 0);
-    if (!(await hasSessionOwnership(sessionId))) {
-      await stopProcessWithEscalation(pid);
-      await removeAudioFile(audioPath);
-      return;
-    }
-
-    await writeState(STATE_FILE_PATH, {
+    spawnedPlaybackPid = await spawnPlayback(audioPath, 0);
+    const didPersistPlayingState = await writeStateIfSessionMatches(STATE_FILE_PATH, sessionId, {
       sessionId,
       status: "playing",
       startedAt: Date.now(),
       offset: 0,
-      pid,
+      pid: spawnedPlaybackPid,
       audioPath,
       audioDuration: synthesis.audioDuration,
       words: synthesis.words,
     });
+    if (!didPersistPlayingState) {
+      await stopProcessWithEscalation(spawnedPlaybackPid);
+      await removeAudioFile(audioPath);
+      return;
+    }
   } catch (error) {
+    if (spawnedPlaybackPid !== null) {
+      await stopProcessWithEscalation(spawnedPlaybackPid);
+    }
+
     const ownsSession = await hasSessionOwnership(sessionId);
     if (!ownsSession) {
       await removeAudioFile(audioPath);

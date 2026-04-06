@@ -9,17 +9,18 @@ import { clearState, readState } from "./lib/state";
  * @returns {Promise<void>} Nothing.
  */
 export default async function command(): Promise<void> {
-  const state = await readState(STATE_FILE_PATH);
-
-  try {
-    if (state) {
-      await stopProcessWithEscalation(state.pid);
-    }
-  } finally {
-    if (state) {
-      await removeAudioFile(state.audioPath);
-    }
-
-    await clearState(STATE_FILE_PATH);
+  const originalState = await readState(STATE_FILE_PATH);
+  if (!originalState) {
+    return;
   }
+
+  await stopProcessWithEscalation(originalState.pid);
+
+  const currentState = await readState(STATE_FILE_PATH);
+  if (!currentState || currentState.sessionId !== originalState.sessionId) {
+    return;
+  }
+
+  await removeAudioFile(originalState.audioPath);
+  await clearState(STATE_FILE_PATH);
 }

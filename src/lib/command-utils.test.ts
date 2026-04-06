@@ -41,6 +41,10 @@ describe("session utilities", () => {
     expect(getAudioFilePath("session-a")).not.toBe(getAudioFilePath("session-b"));
   });
 
+  it("rejects invalid session ids when building audio paths", () => {
+    expect(() => getAudioFilePath("session_1")).toThrowError("Invalid session id");
+  });
+
   it("creates generating state with session ownership", () => {
     const state = createGeneratingState(getAudioFilePath("session-a"), "session-a");
 
