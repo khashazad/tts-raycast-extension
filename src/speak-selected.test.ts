@@ -137,6 +137,17 @@ describe("speak-selected stale session guard", () => {
     expect(showHUDMock).not.toHaveBeenCalled();
   });
 
+  it("shows an error when persisting generating state fails before ownership is established", async () => {
+    readStateMock.mockResolvedValueOnce(null);
+    writeStateMock.mockRejectedValue(new Error("state write failed"));
+
+    await command();
+
+    expect(readStateMock).toHaveBeenCalledTimes(1);
+    expect(spawnPlaybackMock).not.toHaveBeenCalled();
+    expect(showHUDMock).toHaveBeenCalledWith("ElevenLabs: state write failed");
+  });
+
   it("stops spawned playback when ownership changes before final state write", async () => {
     readStateMock.mockResolvedValueOnce(null).mockResolvedValueOnce(createState("session-new"));
     spawnPlaybackMock.mockResolvedValue(4321);

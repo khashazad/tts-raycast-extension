@@ -46,9 +46,9 @@ export async function readState(statePath: string = STATE_FILE_PATH): Promise<TT
  * @returns {Promise<void>} Nothing.
  */
 export async function writeState(statePath: string, state: TTSState): Promise<void> {
-  const temporaryStatePath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temporaryStatePath, JSON.stringify(state), "utf8");
-  await rename(temporaryStatePath, statePath);
+  await withStateLock(statePath, async () => {
+    await writeStateUnlocked(statePath, state);
+  });
 }
 
 /**
@@ -71,7 +71,7 @@ export async function writeStateIfSessionMatches(
       return false;
     }
 
-    await writeState(statePath, state);
+    await writeStateUnlocked(statePath, state);
     return true;
   });
 }
@@ -83,7 +83,9 @@ export async function writeStateIfSessionMatches(
  * @returns {Promise<void>} Nothing.
  */
 export async function clearState(statePath: string = STATE_FILE_PATH): Promise<void> {
-  await rm(statePath, { force: true });
+  await withStateLock(statePath, async () => {
+    await clearStateUnlocked(statePath);
+  });
 }
 
 /**
@@ -180,6 +182,29 @@ function getSessionId(state: LegacyTTSState): string {
   }
 
   return `legacy-${state.startedAt}-${state.pid}`;
+}
+
+/**
+ * Writes state atomically without acquiring the shared state lock.
+ *
+ * @param {string} statePath - Path to the shared state file.
+ * @param {TTSState} state - State payload to persist.
+ * @returns {Promise<void>} Nothing.
+ */
+async function writeStateUnlocked(statePath: string, state: TTSState): Promise<void> {
+  const temporaryStatePath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporaryStatePath, JSON.stringify(state), "utf8");
+  await rename(temporaryStatePath, statePath);
+}
+
+/**
+ * Deletes the shared state file without acquiring the shared state lock.
+ *
+ * @param {string} statePath - Path to the shared state file.
+ * @returns {Promise<void>} Nothing.
+ */
+async function clearStateUnlocked(statePath: string): Promise<void> {
+  await rm(statePath, { force: true });
 }
 
 /**

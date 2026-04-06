@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import command from "./stop";
-import { STATE_FILE_PATH } from "./lib/constants";
+import { STATE_FILE_PATH, getAudioFilePath } from "./lib/constants";
 import type { TTSState } from "./lib/types";
 
 const {
@@ -50,7 +50,7 @@ function createState(sessionId: string): TTSState {
     startedAt: 1_000,
     offset: 2,
     pid: 1234,
-    audioPath: "/tmp/raycast-tts-audio-session-a.mp3",
+    audioPath: getAudioFilePath(sessionId),
     audioDuration: 5,
     words: [{ word: "Hello", start: 0, end: 1 }],
   };

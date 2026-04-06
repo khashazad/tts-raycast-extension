@@ -22,6 +22,7 @@ import {
 export default async function command(): Promise<void> {
   const sessionId = createSessionId();
   const audioPath = getAudioFilePath(sessionId);
+  let hasPersistedGeneratingState = false;
   let spawnedPlaybackPid: number | null = null;
   let selectedText: string;
 
@@ -35,6 +36,7 @@ export default async function command(): Promise<void> {
   try {
     await stopExistingPlayback();
     await writeState(STATE_FILE_PATH, createGeneratingState(audioPath, sessionId));
+    hasPersistedGeneratingState = true;
 
     const preferences = getPreferences();
     const synthesis = await synthesizeWithTimestamps({
@@ -72,13 +74,16 @@ export default async function command(): Promise<void> {
       await stopProcessWithEscalation(spawnedPlaybackPid);
     }
 
-    const ownsSession = await hasSessionOwnership(sessionId);
-    if (!ownsSession) {
-      await removeAudioFile(audioPath);
-      return;
+    if (hasPersistedGeneratingState) {
+      const ownsSession = await hasSessionOwnership(sessionId);
+      if (!ownsSession) {
+        await removeAudioFile(audioPath);
+        return;
+      }
+
+      await clearState(STATE_FILE_PATH);
     }
 
-    await clearState(STATE_FILE_PATH);
     await removeAudioFile(audioPath);
 
     if (error instanceof AfplayNotFoundError) {
