@@ -78,15 +78,47 @@ export function isProcessAlive(pid: number): boolean {
  * @returns {void} Nothing.
  */
 export function stopProcess(pid: number): void {
+  signalProcess(pid, "SIGTERM");
+}
+
+/**
+ * Stops a process with TERM first, then escalates to KILL if needed.
+ *
+ * @param {number} pid - Process ID to terminate.
+ * @param {number} gracePeriodMs - Milliseconds to wait before escalation.
+ * @returns {Promise<void>} Nothing.
+ */
+export async function stopProcessWithEscalation(pid: number, gracePeriodMs: number = 250): Promise<void> {
   if (!isProcessAlive(pid)) {
     return;
   }
 
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch {
-    // Ignore race conditions where the process exits after liveness check.
+  stopProcess(pid);
+  await sleep(Math.max(0, gracePeriodMs));
+
+  if (isProcessAlive(pid)) {
+    signalProcess(pid, "SIGKILL");
   }
+}
+
+/**
+ * Sends a suspend signal to an active playback process.
+ *
+ * @param {number} pid - Process ID to suspend.
+ * @returns {void} Nothing.
+ */
+export function pauseProcess(pid: number): void {
+  signalProcess(pid, "SIGSTOP");
+}
+
+/**
+ * Sends a continue signal to a suspended playback process.
+ *
+ * @param {number} pid - Process ID to resume.
+ * @returns {void} Nothing.
+ */
+export function resumeProcess(pid: number): void {
+  signalProcess(pid, "SIGCONT");
 }
 
 /**
@@ -194,4 +226,35 @@ function hasBinaryCandidate(candidate: string): boolean {
 
   const result = spawnSync("command -v " + candidate, { shell: true, stdio: "ignore" });
   return result.status === 0;
+}
+
+/**
+ * Sends a process signal when the process is still alive.
+ *
+ * @param {number} pid - Process ID to signal.
+ * @param {NodeJS.Signals} signal - Signal to dispatch.
+ * @returns {void} Nothing.
+ */
+function signalProcess(pid: number, signal: NodeJS.Signals): void {
+  if (!isProcessAlive(pid)) {
+    return;
+  }
+
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // Ignore race conditions where the process exits after liveness check.
+  }
+}
+
+/**
+ * Waits for a bounded delay between process-control steps.
+ *
+ * @param {number} milliseconds - Delay duration in milliseconds.
+ * @returns {Promise<void>} Nothing.
+ */
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }

@@ -7,6 +7,7 @@ export interface WordEntry {
 }
 
 export interface TTSState {
+  sessionId: string;
   status: TTSStatus;
   startedAt: number;
   offset: number;

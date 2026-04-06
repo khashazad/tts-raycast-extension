@@ -1,6 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { clampOffset, getBinaryLookupCandidates, getCurrentOffset, getPlaybackInvocation } from "./playback";
+import {
+  clampOffset,
+  getBinaryLookupCandidates,
+  getCurrentOffset,
+  getPlaybackInvocation,
+  pauseProcess,
+  resumeProcess,
+  stopProcessWithEscalation,
+} from "./playback";
 
 describe("getCurrentOffset", () => {
   it("adds elapsed runtime seconds to existing offset", () => {
@@ -45,5 +53,75 @@ describe("getBinaryLookupCandidates", () => {
 
   it("keeps ffplay lookup PATH-based", () => {
     expect(getBinaryLookupCandidates("ffplay", "darwin")).toEqual(["ffplay"]);
+  });
+});
+
+describe("signal-based playback control", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("pauses alive process with SIGSTOP", () => {
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    pauseProcess(1234);
+
+    expect(killSpy).toHaveBeenCalledWith(1234, "SIGSTOP");
+  });
+
+  it("resumes alive process with SIGCONT", () => {
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    resumeProcess(1234);
+
+    expect(killSpy).toHaveBeenCalledWith(1234, "SIGCONT");
+  });
+
+  it("escalates from SIGTERM to SIGKILL when process remains alive", async () => {
+    let isAlive = true;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: number | NodeJS.Signals) => {
+      if (signal === 0) {
+        if (isAlive) {
+          return true;
+        }
+
+        throw new Error("ESRCH");
+      }
+
+      if (signal === "SIGKILL") {
+        isAlive = false;
+      }
+
+      return true;
+    }) as typeof process.kill);
+
+    await stopProcessWithEscalation(1234, 0);
+
+    expect(killSpy).toHaveBeenCalledWith(1234, "SIGTERM");
+    expect(killSpy).toHaveBeenCalledWith(1234, "SIGKILL");
+  });
+
+  it("does not SIGKILL when SIGTERM already stopped process", async () => {
+    let isAlive = true;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: number | NodeJS.Signals) => {
+      if (signal === 0) {
+        if (isAlive) {
+          return true;
+        }
+
+        throw new Error("ESRCH");
+      }
+
+      if (signal === "SIGTERM") {
+        isAlive = false;
+      }
+
+      return true;
+    }) as typeof process.kill);
+
+    await stopProcessWithEscalation(1234, 0);
+
+    expect(killSpy).toHaveBeenCalledWith(1234, "SIGTERM");
+    expect(killSpy).not.toHaveBeenCalledWith(1234, "SIGKILL");
   });
 });

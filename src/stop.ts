@@ -1,5 +1,6 @@
 import { STATE_FILE_PATH } from "./lib/constants";
-import { isProcessAlive, stopProcess } from "./lib/playback";
+import { stopProcessWithEscalation } from "./lib/playback";
+import { removeAudioFile } from "./lib/command-utils";
 import { clearState, readState } from "./lib/state";
 
 /**
@@ -8,12 +9,17 @@ import { clearState, readState } from "./lib/state";
  * @returns {Promise<void>} Nothing.
  */
 export default async function command(): Promise<void> {
+  const state = await readState(STATE_FILE_PATH);
+
   try {
-    const state = await readState(STATE_FILE_PATH);
-    if (state && isProcessAlive(state.pid)) {
-      stopProcess(state.pid);
+    if (state) {
+      await stopProcessWithEscalation(state.pid);
     }
   } finally {
+    if (state) {
+      await removeAudioFile(state.audioPath);
+    }
+
     await clearState(STATE_FILE_PATH);
   }
 }

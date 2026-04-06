@@ -5,10 +5,10 @@ import {
   AfplayNotFoundError,
   clampOffset,
   getCurrentOffset,
-  isProcessAlive,
   spawnPlayback,
-  stopProcess,
+  stopProcessWithEscalation,
 } from "./playback";
+import { removeAudioFile } from "./command-utils";
 import { getPreferences, parseSkipDuration } from "./preferences";
 import { clearState, readActiveState, writeState } from "./state";
 
@@ -32,11 +32,10 @@ export async function skipByDirection(direction: -1 | 1): Promise<void> {
       : state.offset;
   const targetOffset = clampOffset(currentOffset + direction * skipSeconds, state.audioDuration);
 
-  if (isProcessAlive(state.pid)) {
-    stopProcess(state.pid);
-  }
+  await stopProcessWithEscalation(state.pid);
 
   if (targetOffset >= state.audioDuration) {
+    await removeAudioFile(state.audioPath);
     await clearState(STATE_FILE_PATH);
     return;
   }

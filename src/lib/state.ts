@@ -4,6 +4,17 @@ import { STATE_FILE_PATH } from "./constants";
 import { isProcessAlive } from "./playback";
 import type { TTSState } from "./types";
 
+interface LegacyTTSState {
+  sessionId?: string;
+  status: TTSState["status"];
+  startedAt: number;
+  offset: number;
+  pid: number;
+  audioPath: string;
+  audioDuration: number;
+  words: TTSState["words"];
+}
+
 /**
  * Reads persisted extension state from disk.
  *
@@ -13,11 +24,11 @@ import type { TTSState } from "./types";
 export async function readState(statePath: string = STATE_FILE_PATH): Promise<TTSState | null> {
   try {
     const raw = await readFile(statePath, "utf8");
-    const parsed = JSON.parse(raw) as TTSState;
+    const parsed = JSON.parse(raw) as unknown;
     if (!isStateShapeValid(parsed)) {
       return null;
     }
-    return parsed;
+    return normalizeState(parsed);
   } catch {
     return null;
   }
@@ -72,13 +83,14 @@ export async function readActiveState(statePath: string = STATE_FILE_PATH): Prom
  * @param {value} value - Untrusted value parsed from JSON.
  * @returns {boolean} `true` when value matches the expected state shape.
  */
-function isStateShapeValid(value: unknown): value is TTSState {
+function isStateShapeValid(value: unknown): value is LegacyTTSState {
   if (typeof value !== "object" || value === null) {
     return false;
   }
 
-  const candidate = value as Partial<TTSState>;
+  const candidate = value as Partial<LegacyTTSState>;
   return (
+    (typeof candidate.sessionId === "string" || candidate.sessionId === undefined) &&
     typeof candidate.status === "string" &&
     typeof candidate.startedAt === "number" &&
     typeof candidate.offset === "number" &&
@@ -111,4 +123,32 @@ function isWordEntryShapeValid(value: unknown): boolean {
   }
 
   return Number.isFinite(candidate.start) && Number.isFinite(candidate.end) && candidate.start <= candidate.end;
+}
+
+/**
+ * Normalizes parsed state into the current runtime shape.
+ *
+ * @param {LegacyTTSState} state - Valid parsed state payload.
+ * @returns {TTSState} Normalized state with a stable session identifier.
+ */
+function normalizeState(state: LegacyTTSState): TTSState {
+  return {
+    ...state,
+    sessionId: getSessionId(state),
+  };
+}
+
+/**
+ * Selects a persisted or derived session identifier for state.
+ *
+ * @param {LegacyTTSState} state - Parsed state payload.
+ * @returns {string} Session identifier for state ownership checks.
+ */
+function getSessionId(state: LegacyTTSState): string {
+  const rawSessionId = state.sessionId?.trim();
+  if (rawSessionId) {
+    return rawSessionId;
+  }
+
+  return `legacy-${state.startedAt}-${state.pid}`;
 }
