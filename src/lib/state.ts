@@ -262,8 +262,11 @@ async function acquireStateLock(lockPath: string, timeoutMs: number, retryDelayM
  * @returns {Promise<void>} Nothing.
  */
 async function releaseStateLock(lockHandle: FileHandle, lockPath: string): Promise<void> {
-  await lockHandle.close();
-  await rm(lockPath, { force: true });
+  try {
+    await lockHandle.close();
+  } finally {
+    await rm(lockPath, { force: true });
+  }
 }
 
 /**
