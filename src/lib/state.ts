@@ -1,4 +1,4 @@
-import { open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 
 import { STATE_FILE_PATH } from "./constants";
@@ -18,6 +18,7 @@ interface LegacyTTSState {
 
 const STATE_LOCK_TIMEOUT_MS = 1_000;
 const STATE_LOCK_RETRY_MS = 25;
+const STATE_LOCK_STALE_AFTER_MS = 5_000;
 
 /**
  * Reads persisted extension state from disk.
@@ -239,10 +240,14 @@ async function acquireStateLock(lockPath: string, timeoutMs: number, retryDelayM
 
   while (true) {
     try {
-      return await open(lockPath, "wx");
+      return await createStateLockFile(lockPath);
     } catch (error) {
       if (!isLockAlreadyHeldError(error)) {
         throw error;
+      }
+
+      if (await tryRecoverStaleStateLock(lockPath)) {
+        continue;
       }
 
       if (Date.now() >= deadline) {
@@ -251,6 +256,86 @@ async function acquireStateLock(lockPath: string, timeoutMs: number, retryDelayM
 
       await sleep(retryDelayMs);
     }
+  }
+}
+
+/**
+ * Creates and tags a lock file with the current process ID.
+ *
+ * @param {string} lockPath - Lock file path.
+ * @returns {Promise<FileHandle>} Open lock-file handle.
+ */
+async function createStateLockFile(lockPath: string): Promise<FileHandle> {
+  const lockHandle = await open(lockPath, "wx");
+  try {
+    await lockHandle.writeFile(`${process.pid}\n`, "utf8");
+    return lockHandle;
+  } catch (error) {
+    await releaseStateLock(lockHandle, lockPath);
+    throw error;
+  }
+}
+
+/**
+ * Removes stale lock files left behind by terminated processes or orphaned files.
+ *
+ * When the lock names a PID that no longer exists, the lock is removed immediately.
+ * When the PID cannot be read (empty/legacy lock), removal waits until the file is older than
+ * {@link STATE_LOCK_STALE_AFTER_MS} so we do not steal a lock mid-creation.
+ *
+ * @param {string} lockPath - Lock file path.
+ * @returns {Promise<boolean>} `true` when a stale lock was removed.
+ */
+async function tryRecoverStaleStateLock(lockPath: string): Promise<boolean> {
+  const lockFilePid = await readLockFilePid(lockPath);
+  if (lockFilePid !== null) {
+    if (isProcessAlive(lockFilePid)) {
+      return false;
+    }
+    await rm(lockPath, { force: true });
+    return true;
+  }
+
+  const lockAgeMs = await getLockFileAgeMilliseconds(lockPath);
+  if (lockAgeMs === null || lockAgeMs < STATE_LOCK_STALE_AFTER_MS) {
+    return false;
+  }
+
+  await rm(lockPath, { force: true });
+  return true;
+}
+
+/**
+ * Reads process metadata persisted in the lock file.
+ *
+ * @param {string} lockPath - Lock file path.
+ * @returns {Promise<number | null>} PID if present and valid; otherwise `null`.
+ */
+async function readLockFilePid(lockPath: string): Promise<number | null> {
+  try {
+    const rawLockContents = await readFile(lockPath, "utf8");
+    const parsedPid = Number.parseInt(rawLockContents.trim(), 10);
+    if (!Number.isInteger(parsedPid) || parsedPid <= 0) {
+      return null;
+    }
+    return parsedPid;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Computes lock file age in milliseconds.
+ *
+ * @param {string} lockPath - Lock file path.
+ * @returns {Promise<number | null>} Age in milliseconds, or `null` if unavailable.
+ */
+async function getLockFileAgeMilliseconds(lockPath: string): Promise<number | null> {
+  try {
+    const lockStats = await stat(lockPath);
+    return Date.now() - lockStats.mtimeMs;
+  } catch {
+    return null;
   }
 }
 
