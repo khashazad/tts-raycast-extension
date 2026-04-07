@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -131,5 +131,29 @@ describe("state persistence", () => {
         status: "playing",
       }),
     );
+  });
+
+  it("recovers from stale lock files before writing state", async () => {
+    const directory = await createTempDir();
+    const statePath = path.join(directory, "state.json");
+    const lockPath = `${statePath}.lock`;
+    const expected: TTSState = {
+      sessionId: "session-stale-lock",
+      status: "playing",
+      startedAt: 1000,
+      offset: 2,
+      pid: 1234,
+      audioPath: "/tmp/raycast-tts-audio.mp3",
+      audioDuration: 5,
+      words: [{ word: "Hello", start: 0, end: 1 }],
+    };
+
+    await writeFile(lockPath, "", "utf8");
+    const staleTimestamp = new Date(Date.now() - 10_000);
+    await utimes(lockPath, staleTimestamp, staleTimestamp);
+
+    await writeState(statePath, expected);
+
+    expect(await readState(statePath)).toEqual(expected);
   });
 });
