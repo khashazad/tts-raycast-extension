@@ -2,8 +2,9 @@ import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import * as playback from "./playback";
 import { clearState, readState, writeState } from "./state";
 import type { TTSState } from "./types";
 
@@ -155,5 +156,33 @@ describe("state persistence", () => {
     await writeState(statePath, expected);
 
     expect(await readState(statePath)).toEqual(expected);
+  });
+
+  it("recovers from a fresh lock when the recorded PID is not alive", async () => {
+    const isProcessAliveSpy = vi.spyOn(playback, "isProcessAlive").mockReturnValue(false);
+    try {
+      const directory = await createTempDir();
+      const statePath = path.join(directory, "state.json");
+      const lockPath = `${statePath}.lock`;
+      const expected: TTSState = {
+        sessionId: "session-dead-pid-lock",
+        status: "playing",
+        startedAt: 1000,
+        offset: 2,
+        pid: 1234,
+        audioPath: "/tmp/raycast-tts-audio.mp3",
+        audioDuration: 5,
+        words: [{ word: "Hello", start: 0, end: 1 }],
+      };
+
+      await writeFile(lockPath, "999001\n", "utf8");
+
+      await writeState(statePath, expected);
+
+      expect(await readState(statePath)).toEqual(expected);
+      expect(isProcessAliveSpy).toHaveBeenCalledWith(999001);
+    } finally {
+      isProcessAliveSpy.mockRestore();
+    }
   });
 });
